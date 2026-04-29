@@ -1,6 +1,7 @@
 
 #include"shell.h"
 int main(){
+    setup_signals();
     int status=1;
     while(status){
     write(1,"oshell> ",8);

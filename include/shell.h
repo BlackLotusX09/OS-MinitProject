@@ -8,8 +8,22 @@
 #ifndef SHELL_H
 #define SHELL_H
 
+/* Global foreground process group */
+extern pid_t fg_pgid;
+
+/* Global foreground process group */
 void parse_input(char *line, char **args);
-void execute_pipe(char *command[][50],int n);
 int split_pipe(char **args,char *command[][50]);
+
+/* Parsing */
+void execute_pipe(char *command[][50],int n);
 int execute_command(char **args);
+
+/* Execution */
+void handle_sigint(int sig);
+void handle_sigstp(int sig);
+void handle_sigchld(int sig);
+
+/* Signal handlers */
+void setup_signals();
 #endif
