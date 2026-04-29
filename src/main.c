@@ -17,12 +17,13 @@ int main(){
     char *args[100];
     char *command[10][50];
 
-    parse_input(input,args);
+    int is_background=0;
+    parse_input(input, args, &is_background);
     int n=split_pipe(args,command);
     if(n>1){
         execute_pipe(command,n);
     }else{
-        status=execute_command(args);
+        status = execute_command(args, is_background);
     }
     
     }
