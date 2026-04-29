@@ -1,0 +1,1 @@
+ gcc -Wall -o oshell src/*.c -lpthread
