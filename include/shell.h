@@ -10,7 +10,16 @@
 #include <signal.h>
 #include <pthread.h>
 
- #define MAX_JOBS 100
+#define MAX_JOBS 100
+#define MAX_USERS 100
+
+typedef enum {
+    ROLE_ADMIN,
+    ROLE_USER,
+    ROLE_GUEST
+} Role;
+
+
 
 typedef struct {
     int id;
@@ -19,12 +28,29 @@ typedef struct {
     int status;
     int active;
 }Job;
+
+
+typedef struct {
+    char username[32];
+    char password[32];
+    char role[16];
+} User;
+
+extern Role current_role;
+extern char current_user[32];
+
+extern User users[MAX_USERS];
+extern int user_count;
 /* Global foreground process group */
 extern pid_t fg_pgid;
 extern Job jobs[MAX_JOBS];
 extern int join_count;
 extern pthread_mutex_t jobs_lock;
 
+Role get_role_from_string(char *role);
+int login();
+
+void load_users(const char *filename);
 void add_job(pid_t pid, char *name);
 Job* find_job_by_index(int id);
 void remove_job(pid_t pid);

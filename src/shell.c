@@ -1,9 +1,94 @@
 #include "shell.h"
 
+Role current_role;
+char current_user[32];
+
 pid_t fg_pgid = 0;
+
 Job jobs[MAX_JOBS];
 int job_count = 0;
+User users[MAX_USERS];
+int user_count = 0;
 pthread_mutex_t jobs_lock = PTHREAD_MUTEX_INITIALIZER;
+
+Role get_role_from_string(char *role){
+    if(strcmp(role,"admin")==0)return ROLE_ADMIN;
+    if(strcmp(role,"users")==0)return ROLE_USER;
+    return ROLE_GUEST;
+}
+int login() {
+    char username[32];
+    char password[32];
+
+    for (int attempt = 0; attempt < 3; attempt++) {
+
+        write(STDOUT_FILENO, "Username: ", 10);
+        fgets(username, sizeof(username), stdin);
+
+        write(STDOUT_FILENO, "Password: ", 10);
+        fgets(password, sizeof(password), stdin);
+
+        username[strcspn(username, "\n")] = 0;
+        password[strcspn(password, "\n")] = 0;
+
+        for (int i = 0; i < user_count; i++) {
+            if (strcmp(users[i].username, username) == 0 &&
+                strcmp(users[i].password, password) == 0) {
+
+                strcpy(current_user, username);
+                current_role = get_role_from_string(users[i].role);
+
+                char buf[64];
+                int n = snprintf(buf, sizeof(buf),
+                                 "Login successful as %s\n", current_user);
+                write(STDOUT_FILENO, buf, n);
+
+                return 1;   // ✅ success
+            }
+        }
+
+        write(STDOUT_FILENO, "Invalid credentials\n", 20);
+    }
+
+    // 🔥 after 3 failures
+    write(STDOUT_FILENO, "Too many failed attempts\n", 25);
+    exit(1);
+}
+void load_users(const char *filename) {
+    
+    FILE *fp = fopen(filename, "r");
+
+    if (!fp) {
+        perror("Error opening user file");
+        return;
+    }
+
+    char line[128];
+
+    while (fgets(line, sizeof(line), fp)) {
+        if (user_count >= MAX_USERS) break;
+        line[strcspn(line, "\n")] = 0;  // remove newline
+
+        char *username = strtok(line, ":");
+        char *password = strtok(NULL, ":");
+        char *role = strtok(NULL, ":");
+
+        if (username && password && role) {
+            strncpy(users[user_count].username, username, 31);
+            strncpy(users[user_count].password, password, 31);
+            strncpy(users[user_count].role, role, 15);
+
+            users[user_count].username[31] = '\0';
+            users[user_count].password[31] = '\0';
+            users[user_count].role[15] = '\0';
+
+            user_count++;
+        }
+    }
+
+    fclose(fp);
+}
+
 /* ---------------- Parsing ---------------- */
 void add_job(pid_t pid, char *name) {
     pthread_mutex_lock(&jobs_lock);

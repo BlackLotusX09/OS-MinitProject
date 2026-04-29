@@ -2,9 +2,15 @@
 #include"shell.h"
 int main(){
     setup_signals();
+    if(!login()){
+        exit(1);
+    }
+    load_users("/Users/jaswanth/Desktop/OS-SHELL/data/users.txt");
     int status=1;
     while(status){
-    write(1,"oshell> ",8);
+    char prompt[64];
+    int len = snprintf(prompt, sizeof(prompt), "%s@oshell> ", current_user);
+    write(1, prompt, len);
 
     char input[1024];
     if (fgets(input, sizeof(input), stdin) == NULL) {
