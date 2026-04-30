@@ -3,6 +3,7 @@
 
 Role current_role;
 char current_user[32];
+char current_password[32];
 
 pid_t fg_pgid = 0;
 
@@ -14,10 +15,12 @@ pthread_mutex_t jobs_lock = PTHREAD_MUTEX_INITIALIZER;
 
 Role get_role_from_string(char *role){
     if(strcmp(role,"admin")==0)return ROLE_ADMIN;
-    if(strcmp(role,"users")==0)return ROLE_USER;
+    if(strcmp(role,"user")==0)return ROLE_USER;
     return ROLE_GUEST;
 }
-
+void get_history_path(char *path){
+    snprintf(path,PATH_MAX,"%s/data/history.log",BASE_DIR);
+}
 int login() {
     char username[32];
     char password[32];
@@ -38,6 +41,8 @@ int login() {
                 strcmp(users[i].password, password) == 0) {
 
                 strcpy(current_user, username);
+                strncpy(current_password, password, 31);
+                current_password[31] = '\0';
                 current_role = get_role_from_string(users[i].role);
 
                 char buf[64];
@@ -116,27 +121,28 @@ void load_users(const char *filename) {
             users[user_count].username[31] = '\0';
             users[user_count].password[31] = '\0';
             users[user_count].role[15] = '\0';
-            printf("Loaded: %s %s %s\n", username, password, role);
             user_count++;
         }
     }
-    printf("Total users loaded: %d\n", user_count);
     fclose(fp);
 }
 void show_history() {
-    int fd = open(HISTORY_FILE, O_RDONLY);
+    char path[PATH_MAX];
+    get_history_path(path);
+
+    int fd = open(path, O_RDONLY);
+
     if (fd < 0) {
         perror("open failed");
         return;
     }
 
     struct flock lock;
-    lock.l_type = F_RDLCK;   // read lock
+    lock.l_type = F_RDLCK;
     lock.l_whence = SEEK_SET;
     lock.l_start = 0;
     lock.l_len = 0;
 
-    // 🔒 acquire read lock
     fcntl(fd, F_SETLKW, &lock);
 
     FILE *fp = fdopen(fd, "r");
@@ -154,42 +160,43 @@ void show_history() {
         printf("%s", lines[i % 100]);
     }
 
-    // 🔓 release lock
     lock.l_type = F_UNLCK;
     fcntl(fd, F_SETLK, &lock);
 
-    fclose(fp);  // also closes fd
+    fclose(fp);
 }
 
 void append_history(const char *cmd) {
-    int fd = open(HISTORY_FILE, O_WRONLY | O_APPEND | O_CREAT, 0644);
+    char path[PATH_MAX];
+    get_history_path(path);
+
+    int fd = open(path, O_WRONLY | O_APPEND | O_CREAT, 0644);
+
     if (fd < 0) {
         perror("open failed");
         return;
     }
 
     struct flock lock;
-    lock.l_type = F_WRLCK;   // write lock
+    lock.l_type = F_WRLCK;
     lock.l_whence = SEEK_SET;
     lock.l_start = 0;
-    lock.l_len = 0;          // whole file
+    lock.l_len = 0;
 
-    // 🔒 acquire lock (blocking)
     fcntl(fd, F_SETLKW, &lock);
 
-    // ✍️ write command
     write(fd, cmd, strlen(cmd));
     write(fd, "\n", 1);
 
-    // 🔓 release lock
     lock.l_type = F_UNLCK;
     fcntl(fd, F_SETLK, &lock);
 
     close(fd);
 }
-
 /* ---------------- Parsing ---------------- */
 void add_job(pid_t pid, char *name) {
+    /* Limit number of concurrent background jobs */
+    dispatch_semaphore_wait(job_sem, DISPATCH_TIME_FOREVER);
     pthread_mutex_lock(&jobs_lock);
     if (job_count < MAX_JOBS) {
         jobs[job_count].id = job_count + 1;
@@ -200,7 +207,6 @@ void add_job(pid_t pid, char *name) {
         job_count++;
     }
     pthread_mutex_unlock(&jobs_lock);
-    //pthread_mutex_t jobs_lock = PTHREAD_MUTEX_INITIALIZER;
 }
 Job* find_job_by_index(int id) {
     if (id <= 0 || id > job_count) return NULL;
@@ -221,6 +227,8 @@ void remove_job(pid_t pid) {
             break;
         }
     }
+    /* Release semaphore slot after job removal */
+    dispatch_semaphore_signal(job_sem);
 }
 void parse_input(char *line, char **args, int *isBackground) {
 
@@ -265,6 +273,7 @@ int split_pipe(char **args, char *command[][50]) {
 /* ---------------- Signal Handlers ---------------- */
 
 void handle_sigint(int sig) {
+    (void)sig;
     if (fg_pgid > 0) {
         kill(-fg_pgid, SIGINT);
     }
@@ -272,31 +281,45 @@ void handle_sigint(int sig) {
 }
 
 void handle_sigtstp(int sig) {
+    (void)sig;
     if (fg_pgid > 0) {
-        kill(-fg_pgid, SIGSTOP);
+        /* Stop the foreground process group; execute_command will
+           detect WIFSTOPPED and add it to the jobs list. */
+        kill(-fg_pgid, SIGTSTP);
+        fg_pgid = 0;
+    } else {
+        write(STDOUT_FILENO, "\n", 1);
     }
 }
 
 void handle_sigchld(int sig) {
-    pid_t pid;
-
-    while ((pid = waitpid(-1, NULL, WNOHANG)) > 0) {
-        remove_job(pid);
-    }
+    (void)sig;
+    /* Signal-safe: only reap children here; job list cleanup happens
+       in the main thread after blocking SIGCHLD via sigprocmask. */
+    int saved_errno = errno;
+    while (waitpid(-1, NULL, WNOHANG) > 0) {}
+    errno = saved_errno;
 }
 
 void setup_signals() {
     struct sigaction sa;
-
     sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
 
+    /* SIGINT: no SA_RESTART so fgets() returns EINTR and the
+       main loop can reprint the prompt (Ctrl+C behaviour). */
+    sa.sa_flags = 0;
     sa.sa_handler = handle_sigint;
     sigaction(SIGINT, &sa, NULL);
 
+    /* SIGTSTP: same — fgets() must be interrupted so the prompt
+       is reprinted after Ctrl+Z. */
+    sa.sa_flags = 0;
     sa.sa_handler = handle_sigtstp;
     sigaction(SIGTSTP, &sa, NULL);
 
+    /* SIGCHLD: SA_RESTART keeps other syscalls running smoothly;
+       SA_NOCLDSTOP avoids spurious signals when children are stopped. */
+    sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
     sa.sa_handler = handle_sigchld;
     sigaction(SIGCHLD, &sa, NULL);
 }
@@ -310,7 +333,6 @@ int execute_command(char **args,int isBackground) {
         return 1;
     }
     /* Built-ins */
-    printf("CMD = %s\n", args[0]);
     if (strcmp(args[0], "cd") == 0) {
         if (args[1] == NULL) {
             fprintf(stderr, "cd: expected argument\n");
@@ -341,7 +363,6 @@ int execute_command(char **args,int isBackground) {
     }
 
     if (strcmp(args[0], "jobs") == 0) {
-    printf("job_count = %d\n", job_count);
     pthread_mutex_lock(&jobs_lock);
     
     for (int i = 0; i < job_count; i++) {
@@ -419,11 +440,30 @@ int execute_command(char **args,int isBackground) {
             int id=job_count;
             int len = snprintf(buffer, sizeof(buffer), "[%d] %d\n",id, pid);
             write(STDOUT_FILENO, buffer, len);
-        }else{
+        } else {
             fg_pgid = pid;
             int status;
-            waitpid(pid, &status, 0);
+            /* WUNTRACED: return when child is stopped (Ctrl+Z), not just when it exits */
+            waitpid(pid, &status, WUNTRACED);
             fg_pgid = 0;
+
+            if (WIFSTOPPED(status)) {
+                /* Child was stopped by Ctrl+Z — add it to the jobs list */
+                pthread_mutex_lock(&jobs_lock);
+                if (job_count < MAX_JOBS) {
+                    jobs[job_count].id   = job_count + 1;
+                    jobs[job_count].pid  = pid;
+                    strncpy(jobs[job_count].name, args[0], 63);
+                    jobs[job_count].name[63] = '\0';
+                    jobs[job_count].active = 1;
+                    job_count++;
+                }
+                char buf[64];
+                int len = snprintf(buf, sizeof(buf), "\n[%d]+ Stopped   %s\n",
+                                   job_count, args[0]);
+                write(STDOUT_FILENO, buf, len);
+                pthread_mutex_unlock(&jobs_lock);
+            }
         }
        
     }

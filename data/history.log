@@ -11,3 +11,53 @@ exit
 rsh 127.0.0.1 9090 ls
 rsh 127.0.0.1 9090 pwd
 rsh 127.0.0.1 9090 whoami
+ls
+pwd
+cd /tmp
+cd /tmp
+cd /tmp
+cd /tmp
+for i in {1..10}; do echo T1_$i; done
+for i in {1..10}; do echo T2_$i; done
+sleep 10 &a
+sleep 10 &
+fg 1
+jobs
+ls | grep src
+sleep 20 
+sleep 20 
+exit
+exit
+rsh 127.0.0.1 9090 ls
+rsh 127.0.0.1 9090 ls
+rsh 127.0.0.1 9090 pwd
+rsh 127.0.0.1 9090 whoami
+rsh 127.0.0.1 9090 rm -rf test
+rsh 127.0.0.1 9090 rm -rf test
+admin@oshell> rsh 127.0.0.1 9090 rm -rf test
+CMD = rsh
+admin@oshell> 
+rsh 127.0.0.1 9090 echo test2
+rsh 127.0.0.1 9090 echoe test1
+sleep 10 
+ls | wc
+sleep 10
+exi
+exit
+exit
+sleep 10
+sleep 10
+exi
+exit
+sleep 10
+sleep 10
+sleep 10
+sleep 10
+ls
+pwd
+sleep 10 
+exit
+ls
+pwd
+exit
+exit

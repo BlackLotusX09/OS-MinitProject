@@ -1,4 +1,5 @@
 #include "client.h"
+#include "shell.h"
 
 int execute_rsh(char **args) {
     if (args[1] == NULL || args[2] == NULL || args[3] == NULL) {
@@ -57,7 +58,7 @@ int execute_rsh(char **args) {
 
     // send credentials
     char auth[128];
-    snprintf(auth, sizeof(auth), "admin:admin\n");
+    snprintf(auth, sizeof(auth), "%s:%s\n", current_user, current_password);
     send(sock, auth, strlen(auth), 0);
 
     // receive auth response

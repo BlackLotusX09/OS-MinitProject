@@ -153,7 +153,7 @@ int server() {
     signal(SIGCHLD, SIG_IGN);
 
     /* 🔥 IMPORTANT: load users */
-    load_users("/Users/jaswanth/Desktop/OS-SHELL/data/users.txt");
+    load_users("data/users.txt");
 
     if ((server_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         perror("Socket creation failed");

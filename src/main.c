@@ -1,17 +1,27 @@
-#include"server.h"
-#include"shell.h"
+#include "server.h"
+#include "shell.h"
+#include <errno.h>
+#include <dispatch/dispatch.h>
 
+char BASE_DIR[PATH_MAX];
+dispatch_semaphore_t job_sem;
 int main(int argc, char *argv[]) {
+
 
     // 🔥 SERVER MODE
     if (argc > 1 && strcmp(argv[1], "--server") == 0) {
         return server();
     }
-
+    getcwd(BASE_DIR, sizeof(BASE_DIR));
     // 🔥 NORMAL SHELL MODE
     setup_signals();
 
-    load_users("/Users/jaswanth/Desktop/OS-SHELL/data/users.txt");
+    load_users("data/users.txt");
+    job_sem = dispatch_semaphore_create(MAX_BG_JOBS);
+    if (job_sem == NULL) {
+        perror("dispatch_semaphore_create");
+        exit(1);
+    }
 
     if (!login()) {
         exit(1);
@@ -28,9 +38,15 @@ int main(int argc, char *argv[]) {
         char input[1024];
 
         if (fgets(input, sizeof(input), stdin) == NULL) {
-            write(1, "\n", 1);
-            break;
+        // Check if the "error" was actually just a signal interruption
+        if (errno == EINTR) {
+            clearerr(stdin); // Reset the EOF/error tags for stdin[cite: 1]
+            continue;        // Jump back to the start of the while loop[cite: 1]
         }
+        // If it wasn't EINTR, it's a real EOF (like Ctrl+D)[cite: 1]
+        write(1, "\n", 1);
+        break; 
+    }
 
         input[strcspn(input, "\n")] = 0;
 
@@ -56,5 +72,9 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    return 0;
+    // cleanup
+    // cleanup (dispatch semaphores are reference‑counted; releasing is optional on program exit)
+    // No explicit destroy needed for dispatch_semaphore_t
+
+
 }

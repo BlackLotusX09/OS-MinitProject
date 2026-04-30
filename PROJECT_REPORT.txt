@@ -1,0 +1,326 @@
+================================================================================
+                        OS-SHELL — PROJECT REPORT
+================================================================================
+
+Course   : Operating Systems Mini-Project
+Language : C (C11)
+Platform : macOS / Linux
+Build    : GNU Make / GCC
+
+--------------------------------------------------------------------------------
+1. PROJECT OVERVIEW
+--------------------------------------------------------------------------------
+
+OS-Shell is a custom Unix-like command-line shell written in C. It demonstrates
+core operating-system concepts including process management, signal handling,
+inter-process communication (IPC), file locking, job control, and network
+programming.
+
+The shell supports two modes:
+
+  Mode          Command               Description
+  -----------   -------------------   ------------------------------------------
+  Interactive   ./oshell              Full shell REPL with login, built-ins,
+                                      job control
+  Server        ./oshell --server     TCP server on port 9090 accepting remote
+                                      commands via the rsh built-in
+
+--------------------------------------------------------------------------------
+2. DIRECTORY STRUCTURE
+--------------------------------------------------------------------------------
+
+  OS-Shell/
+  ├── include/
+  │   ├── shell.h        Core types, globals, function prototypes
+  │   ├── client.h       RSH client header
+  │   └── server.h       TCP server header
+  ├── src/
+  │   ├── main.c         Entry point, shell REPL loop
+  │   ├── shell.c        Core shell logic
+  │   ├── client.c       Remote shell (rsh) client
+  │   └── server.c       TCP server for remote connections
+  ├── data/
+  │   ├── users.txt      User credentials (username:password:role)
+  │   └── history.log    Command history (auto-generated at runtime)
+  ├── Makefile
+  ├── README.md
+  └── PROJECT_REPORT.md
+
+--------------------------------------------------------------------------------
+3. FEATURES IMPLEMENTED
+--------------------------------------------------------------------------------
+
+3.1 User Authentication
+    - Three-attempt login with username and password
+    - Credentials loaded from data/users.txt (format: username:password:role)
+    - Supported roles: admin, user, guest
+    - After 3 failed attempts the shell prints a message and exits
+
+3.2 Role-Based Access Control (RBAC)
+
+    Command                   Admin    User    Guest
+    -----------------------   -----    ----    -----
+    ls, pwd, echo, help,
+    history, exit               Yes     Yes     Yes
+    All other commands          Yes     Yes      No
+    kill                        Yes      No      No
+
+3.3 Built-in Commands
+
+    Command              Description
+    ------------------   -----------------------------------------------
+    cd <dir>             Change working directory
+    pwd                  Print current working directory
+    history              Show the last 20 commands from history.log
+    jobs                 List all background/stopped jobs
+    fg <N>               Bring job number N to the foreground
+    exit                 Exit the shell
+    rsh <host> <port>
+        <command>        Execute a command on the remote server
+
+3.4 External Commands and Pipes
+    - Non-built-in commands are executed via fork() + execvp()
+    - Pipe support: cmd1 | cmd2 | cmd3
+    - Background execution: append & to any command (e.g. sleep 30 &)
+
+3.5 Job Control
+    - Background jobs are tracked in a mutex-protected jobs[] array
+    - A semaphore (dispatch_semaphore_t) limits concurrent background
+      jobs to a maximum of 5 (MAX_BG_JOBS)
+    - fg <N> resumes a stopped or background job in the foreground
+    - Ctrl+Z stops the foreground process and adds it to the jobs list
+    - Ctrl+C kills the foreground process; if none is running, the
+      prompt is simply reprinted
+
+3.6 Signal Handling
+
+    Signal            Behaviour
+    ---------------   --------------------------------------------------
+    SIGINT (Ctrl+C)   Kills foreground child; reprints prompt otherwise
+    SIGTSTP (Ctrl+Z)  Stops foreground child; adds to jobs list; reprints
+                      prompt
+    SIGCHLD           Asynchronously reaps zombie children (signal-safe,
+                      no mutex used inside the handler)
+
+    Note: SA_RESTART is NOT set for SIGINT and SIGTSTP so that fgets()
+    returns EINTR, allowing the main loop to reprint the prompt. It IS
+    set for SIGCHLD to keep other syscalls running smoothly.
+
+3.7 Command History
+    - Every command (except 'history' itself) is appended to
+      data/history.log
+    - Read/write locking via fcntl (F_RDLCK / F_WRLCK) ensures safe
+      concurrent access
+    - 'history' displays the last 20 lines
+
+3.8 Remote Shell (RSH)
+    - Client connects to the server over TCP
+    - Authentication phase: sends current_user:current_password
+    - After successful auth, the command is sent; the server executes
+      it via popen() and streams the result back
+    - Server forks a child process per connected client
+    - Role-based filtering is also applied server-side
+
+--------------------------------------------------------------------------------
+4. KEY OPERATING SYSTEM CONCEPTS DEMONSTRATED
+--------------------------------------------------------------------------------
+
+  Concept                   Where Used
+  ------------------------  ----------------------------------------------------
+  fork() / execvp()         External command execution in execute_command()
+  waitpid(WUNTRACED)        Detect stopped (Ctrl+Z) vs exited foreground job
+  setpgid()                 Each child gets its own process group for
+                            accurate signal delivery
+  sigaction()               SIGINT, SIGTSTP, SIGCHLD handlers
+  pthread_mutex_t           Protects jobs[] array from race conditions
+  dispatch_semaphore_t      Limits maximum background jobs to 5 (GCD,
+  (GCD semaphore)           replaces deprecated POSIX sem_init on macOS)
+  fcntl file locking        Safe concurrent history reads and writes
+  TCP sockets               Server/client remote shell (server.c / client.c)
+  popen()                   Server-side command execution
+  Role-based access         Whitelist/blacklist per role in is_allowed()
+
+--------------------------------------------------------------------------------
+5. BUILD AND RUN
+--------------------------------------------------------------------------------
+
+  # Compile
+  gcc -Iinclude src/main.c src/shell.c src/server.c src/client.c -o oshell
+
+  # Run interactively
+  ./oshell
+
+  # Run in server mode (open a separate terminal)
+  ./oshell --server
+
+--------------------------------------------------------------------------------
+6. TEST CASES
+--------------------------------------------------------------------------------
+
+TC-01  Valid Login — Admin
+  Steps : Run ./oshell; enter Username: admin; Password: admin
+  Expect: "Login successful as admin"  Prompt: admin@oshell>
+
+TC-02  Valid Login — User
+  Steps : Run ./oshell; enter Username: user1; Password: 123
+  Expect: "Login successful as user1"  Prompt: user1@oshell>
+
+TC-03  Valid Login — Guest
+  Steps : Run ./oshell; enter Username: guest; Password: guest
+  Expect: "Login successful as guest"  Prompt: guest@oshell>
+
+TC-04  Invalid Login (3 Attempts)
+  Steps : Enter wrong credentials three times
+  Expect: "Too many failed attempts" and shell exits
+
+TC-05  Built-in: pwd
+  Input : admin@oshell> pwd
+  Expect: Current working directory path is printed
+
+TC-06  Built-in: cd
+  Input : admin@oshell> cd /tmp
+          admin@oshell> pwd
+  Expect: Second command prints /tmp
+
+TC-07  Built-in: history
+  Input : admin@oshell> ls
+          admin@oshell> pwd
+          admin@oshell> history
+  Expect: Recent commands listed (up to 20), ending with ls and pwd
+
+TC-08  External Command: ls
+  Input : admin@oshell> ls
+  Expect: Directory listing is printed
+
+TC-09  Pipe: ls | wc -l
+  Input : admin@oshell> ls | wc -l
+  Expect: Number of files/directories in the current directory
+
+TC-10  Background Job: sleep 10 &
+  Input : admin@oshell> sleep 10 &
+  Expect: "[1] <pid>" printed immediately; shell returns to prompt
+
+TC-11  jobs — List Background Jobs
+  Input : admin@oshell> sleep 30 &
+          admin@oshell> sleep 40 &
+          admin@oshell> jobs
+  Expect: Both jobs listed with IDs and PIDs
+
+TC-12  Foreground: fg
+  Input : admin@oshell> sleep 30 &
+          admin@oshell> fg 1
+  Expect: Shell blocks waiting for sleep 30 to finish
+
+TC-13  Semaphore — Max 5 Background Jobs
+  Steps : Start 5 background jobs (e.g. sleep 60 &) then try a 6th
+  Expect: The 6th add_job call blocks until one of the first 5 finishes
+
+TC-14  Ctrl+C at Prompt (No Foreground Child)
+  Steps : Press Ctrl+C at an idle prompt
+  Expect: Newline printed; prompt reprinted; shell does NOT exit
+
+TC-15  Ctrl+C Kills Foreground Process
+  Input : admin@oshell> sleep 100
+          <press Ctrl+C>
+  Expect: sleep 100 is terminated; shell returns to prompt
+
+TC-16  Ctrl+Z Stops Foreground Process
+  Input : admin@oshell> sleep 100
+          <press Ctrl+Z>
+  Expect: "[1]+ Stopped   sleep" printed; shell returns to prompt;
+          jobs lists the stopped job
+
+TC-17  Ctrl+Z at Prompt (No Foreground Child)
+  Steps : Press Ctrl+Z at an idle prompt
+  Expect: Newline printed; prompt reprinted; shell does NOT suspend
+
+TC-18  RBAC — Guest Cannot Run cat
+  Steps : Login as guest; run: cat README.md
+  Expect: "Permission denied"
+
+TC-19  RBAC — Guest Can Run ls and pwd
+  Steps : Login as guest; run ls, then pwd
+  Expect: Both commands succeed
+
+TC-20  RBAC — User Cannot Run kill
+  Steps : Login as user1; run: kill 1234
+  Expect: "Permission denied"
+
+TC-21  RSH — Basic Command
+  Pre   : ./oshell --server running in another terminal
+  Input : admin@oshell> rsh 127.0.0.1 9090 ls
+  Expect: ls output from server's working directory
+
+TC-22  RSH — Auth Uses Logged-in Credentials
+  Steps : Login as admin; run rsh 127.0.0.1 9090 pwd
+  Expect: Auth succeeds automatically using admin:admin
+
+TC-23  RSH — Guest Permission Denied on Server
+  Steps : Login as guest locally; run rsh 127.0.0.1 9090 cat /etc/hosts
+  Expect: Server replies "Permission denied"
+
+TC-24  History Persistence Across Sessions
+  Steps : Run commands; exit; restart ./oshell; run history
+  Expect: Commands from the previous session are still shown
+
+TC-25  exit — Graceful Shell Exit
+  Input : admin@oshell> exit
+  Expect: Shell exits cleanly; terminal prompt returns
+
+--------------------------------------------------------------------------------
+7. BUGS FIXED DURING DEVELOPMENT
+--------------------------------------------------------------------------------
+
+  Bug / Warning              File          Fix Applied
+  -------------------------  ------------  -------------------------------------
+  "users" vs "user" role     shell.c       Changed strcmp to match "user"
+  string mismatch            users.txt     Fixed role field from users -> user
+  BASE_DIR defined twice     shell.c       Removed duplicate; kept in main.c
+  Hardcoded admin:admin      client.c      Now uses current_user / current_password
+  Mutex in signal handler    shell.c       Removed; SIGCHLD handler is now
+  (SIGCHLD deadlock risk)                  signal-safe (waitpid only)
+  Debug printf statements    shell.c       Removed all debug prints
+  SA_RESTART on SIGINT/      shell.c       Removed SA_RESTART for SIGINT and
+  SIGTSTP (prompt not                      SIGTSTP; kept for SIGCHLD only
+  reprinted after Ctrl+C/Z)
+  waitpid doesn't return     shell.c       Added WUNTRACED flag; handle
+  on Ctrl+Z                               WIFSTOPPED to add job to list
+  POSIX sem_init deprecated  main.c        Replaced with dispatch_semaphore_t
+  / not implemented on macOS shell.h       (Apple GCD) — no runtime error
+  Missing extern declarations shell.h      Added BASE_DIR, current_password,
+                                           job_count (was join_count typo)
+  handle_sigstp typo in      shell.h       Renamed to handle_sigtstp
+  header
+  Makefile missing separator Makefile      Replaced with proper Makefile
+
+--------------------------------------------------------------------------------
+8. KNOWN LIMITATIONS
+--------------------------------------------------------------------------------
+
+  1. I/O Redirection (> and <) is not implemented.
+  2. The kill built-in command is not implemented (only RBAC-blocked).
+  3. The server executes commands via popen (spawns /bin/sh), not oshell.
+  4. history.log grows without bound over time.
+  5. fg does not restore the terminal foreground process group on macOS
+     (tcsetpgrp not called), so some interactive programs may behave oddly.
+
+--------------------------------------------------------------------------------
+9. FILES MODIFIED / CREATED
+--------------------------------------------------------------------------------
+
+  File                  Status     Notes
+  --------------------  ---------  --------------------------------------------
+  src/main.c            Modified   Semaphore init, getcwd, signal setup, return
+  src/shell.c           Modified   All core logic — login, RBAC, job control,
+                                   signal handlers, history
+  src/client.c          Modified   Uses current_user / current_password for auth
+  src/server.c          Existing   TCP server, per-client fork, RBAC filtering
+  include/shell.h       Modified   Added externs, dispatch_semaphore_t,
+                                   MAX_BG_JOBS, fixed typos
+  data/users.txt        Fixed      Role corrected from "users" to "user"
+  src/Makefile          Replaced   Fixed missing-separator error; proper rules
+  README.md             Updated    Full project description added
+
+================================================================================
+                             END OF REPORT
+================================================================================

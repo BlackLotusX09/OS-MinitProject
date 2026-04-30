@@ -10,10 +10,14 @@
 #include <signal.h>
 #include <pthread.h>
 #include <fcntl.h>   // For fcntl, flock, and open flags
+#include <errno.h>
+#include <dispatch/dispatch.h>
 
-#define HISTORY_FILE "/Users/jaswanth/Desktop/OS-SHELL/data/history.log"
+
+#define HISTORY_FILE "data/history.log"
 #define MAX_JOBS 100
 #define MAX_USERS 100
+#define MAX_BG_JOBS 5
 
 typedef enum {
     ROLE_ADMIN,
@@ -40,14 +44,17 @@ typedef struct {
 
 extern Role current_role;
 extern char current_user[32];
+extern char current_password[32];
+extern char BASE_DIR[PATH_MAX];
 
 extern User users[MAX_USERS];
 extern int user_count;
 /* Global foreground process group */
 extern pid_t fg_pgid;
 extern Job jobs[MAX_JOBS];
-extern int join_count;
+extern int job_count;
 extern pthread_mutex_t jobs_lock;
+extern dispatch_semaphore_t job_sem;
 
 
 
@@ -59,6 +66,7 @@ int is_allowed(char **args);
 void append_history(const char *cmd);
 void show_history();
 
+void get_history_path(char *path);
 void load_users(const char *filename);
 void add_job(pid_t pid, char *name);
 Job* find_job_by_index(int id);
@@ -73,7 +81,7 @@ int execute_command(char **args,int isBackground);
 
 /* Execution */
 void handle_sigint(int sig);
-void handle_sigstp(int sig);
+void handle_sigtstp(int sig);
 void handle_sigchld(int sig);
 
 /* Signal handlers */
