@@ -55,6 +55,7 @@ void show_history();
 void add_job(pid_t pid, char *name);
 Job* find_job_by_index(int id);
 void remove_job(pid_t pid);
+void reap_jobs();
 void parse_input(char *line, char **args, int *isBackground);
 int split_pipe(char **args, char *command[][50]);
 int execute_command(char **args, int isBackground);

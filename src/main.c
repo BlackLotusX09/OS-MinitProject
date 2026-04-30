@@ -24,6 +24,7 @@ int main(int argc, char *argv[]) {
 
     int status = 1;
     while (status) {
+        reap_jobs();
         /* Display prompt and read user input */
         printf("%s@oshell> ", current_user);
         fflush(stdout);

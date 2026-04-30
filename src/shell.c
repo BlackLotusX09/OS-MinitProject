@@ -68,7 +68,7 @@ int is_allowed(char **args) {
     if (current_role == ROLE_GUEST) {
         if (strcmp(args[0], "ls") == 0 || strcmp(args[0], "pwd") == 0 ||
             strcmp(args[0], "echo") == 0 || strcmp(args[0], "help") == 0 ||
-            strcmp(args[0], "exit") == 0) return 1;
+            strcmp(args[0], "history") == 0 || strcmp(args[0], "exit") == 0) return 1;
         return 0;
     }
     return 0;
@@ -137,7 +137,10 @@ void append_history(const char *cmd) {
 
 /* Add a new background job to the tracking list */
 void add_job(pid_t pid, char *name) {
-    dispatch_semaphore_wait(job_sem, DISPATCH_TIME_FOREVER);
+    /* Wait for a slot, cleaning up finished jobs if full */
+    while (dispatch_semaphore_wait(job_sem, dispatch_time(DISPATCH_TIME_NOW, 100 * NSEC_PER_MSEC)) != 0) {
+        reap_jobs();
+    }
     pthread_mutex_lock(&jobs_lock);
     if (job_count < MAX_JOBS) {
         jobs[job_count].id = job_count + 1;
@@ -157,14 +160,27 @@ Job* find_job_by_index(int id) {
 
 /* Remove a job from the list and release its semaphore slot */
 void remove_job(pid_t pid) {
+    int found = 0;
     for (int i = 0; i < job_count; i++) {
         if (jobs[i].pid == pid) {
             for (int j = i; j < job_count - 1; j++) jobs[j] = jobs[j + 1];
             job_count--;
+            found = 1;
             break;
         }
     }
-    dispatch_semaphore_signal(job_sem);
+    if (found) dispatch_semaphore_signal(job_sem);
+}
+
+/* Check for finished jobs and cleanup the list */
+void reap_jobs() {
+    pid_t pid;
+    int status;
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        pthread_mutex_lock(&jobs_lock);
+        remove_job(pid);
+        pthread_mutex_unlock(&jobs_lock);
+    }
 }
 
 /* Tokenize input string into arguments and detect background flag */
@@ -221,9 +237,7 @@ void handle_sigtstp(int sig) {
 /* Reap zombie children in the background */
 void handle_sigchld(int sig) {
     (void)sig;
-    int saved_errno = errno;
-    while (waitpid(-1, NULL, WNOHANG) > 0) {}
-    errno = saved_errno;
+    /* Reaping is now handled in the main loop/add_job via reap_jobs() */
 }
 
 /* Setup signal handlers for INT, TSTP, and CHLD signals */
@@ -302,7 +316,10 @@ int execute_command(char **args, int isBackground) {
         } else {
             fg_pgid = pid;
             int status;
-            waitpid(pid, &status, WUNTRACED);
+            /* Loop waitpid if interrupted by signal to catch stop/exit status */
+            while (waitpid(pid, &status, WUNTRACED) < 0) {
+                if (errno != EINTR) break;
+            }
             fg_pgid = 0;
             if (WIFSTOPPED(status)) {
                 pthread_mutex_lock(&jobs_lock);

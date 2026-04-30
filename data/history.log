@@ -65,3 +65,56 @@ exit
 git add .
 git commit -m "3rd draft"
 exit
+exit
+exit
+exit
+ls | wc -l
+sleep 10 &
+jobs
+sleep 30 &
+sleep 40 &
+jobs
+fg 1
+sleep 60 &
+sleep 60 &
+sleep 60 &
+sleep 60 &
+sleep 60 &
+admin@oshell> sleep 60 &
+[3] 21793
+admin@oshell> sleep 60 &
+[4] 21817
+admin@oshell> sleep 60 &
+[5] 21829
+admin@oshell> sleep 60 &
+^Z
+^C
+exit
+sleep 60 &
+sleep 60 &
+sleep 60 &
+sleep 60 &
+sleep 60 &
+sleep 60 &
+sleep 100
+jobs
+sleep 100
+sleep 100
+exit
+cat README.md
+exit
+rsh 127.0.0.1 9090 ls
+rsh 127.0.0.1 9090 pwd
+exit
+rsh 127.0.0.1 9090 cat /etc/hosts
+exit
+./oshell
+rsh 127.0.0.1 9090 cat /etc/hosts
+exit
+sleep 60 &
+sleep 60 &
+sleep 60 &
+sleep 60 &
+sleep 60 &
+sleep 60 &
+exit
