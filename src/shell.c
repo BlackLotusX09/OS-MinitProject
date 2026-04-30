@@ -54,6 +54,39 @@ int login() {
     write(STDOUT_FILENO, "Too many failed attempts\n", 25);
     exit(1);
 }
+int is_allowed(char **args) {
+
+    if (args[0] == NULL) return 1;
+
+    // 👑 ADMIN → allow all
+    if (current_role == ROLE_ADMIN) {
+        return 1;
+    }
+
+    // 👤 USER
+    if (current_role == ROLE_USER) {
+        if (strcmp(args[0], "kill") == 0) {
+            return 0;
+        }
+        return 1;
+    }
+
+    // 👶 GUEST
+    if (current_role == ROLE_GUEST) {
+
+        if (strcmp(args[0], "ls") == 0 ||
+            strcmp(args[0], "pwd") == 0 ||
+            strcmp(args[0], "echo") == 0 ||
+            strcmp(args[0], "help") == 0 ||
+            strcmp(args[0], "exit") == 0) {
+            return 1;
+        }
+
+        return 0;
+    }
+
+    return 0;
+}
 void load_users(const char *filename) {
     
     FILE *fp = fopen(filename, "r");
@@ -81,12 +114,76 @@ void load_users(const char *filename) {
             users[user_count].username[31] = '\0';
             users[user_count].password[31] = '\0';
             users[user_count].role[15] = '\0';
-
+            printf("Loaded: %s %s %s\n", username, password, role);
             user_count++;
         }
     }
-
+    printf("Total users loaded: %d\n", user_count);
     fclose(fp);
+}
+void show_history() {
+    int fd = open(HISTORY_FILE, O_RDONLY);
+    if (fd < 0) {
+        perror("open failed");
+        return;
+    }
+
+    struct flock lock;
+    lock.l_type = F_RDLCK;   // read lock
+    lock.l_whence = SEEK_SET;
+    lock.l_start = 0;
+    lock.l_len = 0;
+
+    // 🔒 acquire read lock
+    fcntl(fd, F_SETLKW, &lock);
+
+    FILE *fp = fdopen(fd, "r");
+
+    char lines[100][256];
+    int count = 0;
+
+    while (fgets(lines[count % 100], sizeof(lines[0]), fp)) {
+        count++;
+    }
+
+    int start = (count > 20) ? count - 20 : 0;
+
+    for (int i = start; i < count; i++) {
+        printf("%s", lines[i % 100]);
+    }
+
+    // 🔓 release lock
+    lock.l_type = F_UNLCK;
+    fcntl(fd, F_SETLK, &lock);
+
+    fclose(fp);  // also closes fd
+}
+
+void append_history(const char *cmd) {
+    int fd = open(HISTORY_FILE, O_WRONLY | O_APPEND | O_CREAT, 0644);
+    if (fd < 0) {
+        perror("open failed");
+        return;
+    }
+
+    struct flock lock;
+    lock.l_type = F_WRLCK;   // write lock
+    lock.l_whence = SEEK_SET;
+    lock.l_start = 0;
+    lock.l_len = 0;          // whole file
+
+    // 🔒 acquire lock (blocking)
+    fcntl(fd, F_SETLKW, &lock);
+
+    // ✍️ write command
+    write(fd, cmd, strlen(cmd));
+    write(fd, "\n", 1);
+
+    // 🔓 release lock
+    lock.l_type = F_UNLCK;
+    fcntl(fd, F_SETLK, &lock);
+
+    close(fd);
 }
 
 /* ---------------- Parsing ---------------- */
@@ -206,7 +303,10 @@ void setup_signals() {
 
 int execute_command(char **args,int isBackground) {
     if (args[0] == NULL) return 1;
-
+    if(!is_allowed(args)){
+        write(STDOUT_FILENO,"Permission denied\n",18);
+        return 1;
+    }
     /* Built-ins */
     printf("CMD = %s\n", args[0]);
     if (strcmp(args[0], "cd") == 0) {
@@ -217,6 +317,10 @@ int execute_command(char **args,int isBackground) {
                 perror("cd failed");
             }
         }
+        return 1;
+    }
+     if (strcmp(args[0], "history") == 0) {
+        show_history();
         return 1;
     }
 
@@ -242,7 +346,7 @@ int execute_command(char **args,int isBackground) {
                    jobs[i].pid);
         }
     }
-
+   
     pthread_mutex_unlock(&jobs_lock);
 
     return 1;

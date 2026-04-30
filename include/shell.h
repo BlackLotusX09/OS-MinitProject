@@ -9,7 +9,9 @@
 #include <sys/wait.h>
 #include <signal.h>
 #include <pthread.h>
+#include <fcntl.h>   // For fcntl, flock, and open flags
 
+#define HISTORY_FILE "/Users/jaswanth/Desktop/OS-SHELL/data/history.log"
 #define MAX_JOBS 100
 #define MAX_USERS 100
 
@@ -49,6 +51,10 @@ extern pthread_mutex_t jobs_lock;
 
 Role get_role_from_string(char *role);
 int login();
+int is_allowed(char **args);
+
+void append_history(const char *cmd);
+void show_history();
 
 void load_users(const char *filename);
 void add_job(pid_t pid, char *name);

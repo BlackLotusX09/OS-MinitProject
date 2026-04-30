@@ -1,0 +1,3 @@
+admin:admin:admin
+user1:123:users
+guest:guest:guest
