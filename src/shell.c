@@ -1,4 +1,5 @@
 #include "shell.h"
+#include "client.h"
 
 Role current_role;
 char current_user[32];
@@ -16,6 +17,7 @@ Role get_role_from_string(char *role){
     if(strcmp(role,"users")==0)return ROLE_USER;
     return ROLE_GUEST;
 }
+
 int login() {
     char username[32];
     char password[32];
@@ -332,6 +334,10 @@ int execute_command(char **args,int isBackground) {
             perror("pwd failed");
         }
         return 1;
+    }
+
+    if(strcmp(args[0],"rsh")==0){
+        return execute_rsh(args);
     }
 
     if (strcmp(args[0], "jobs") == 0) {

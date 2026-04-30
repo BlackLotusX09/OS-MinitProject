@@ -8,3 +8,6 @@ pwd
 history
 exit
 exit
+rsh 127.0.0.1 9090 ls
+rsh 127.0.0.1 9090 pwd
+rsh 127.0.0.1 9090 whoami

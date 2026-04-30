@@ -49,9 +49,12 @@ extern Job jobs[MAX_JOBS];
 extern int join_count;
 extern pthread_mutex_t jobs_lock;
 
+
+
 Role get_role_from_string(char *role);
 int login();
 int is_allowed(char **args);
+
 
 void append_history(const char *cmd);
 void show_history();
