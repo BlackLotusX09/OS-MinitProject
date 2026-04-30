@@ -1,98 +1,50 @@
 #include "client.h"
 #include "shell.h"
 
+/* Execute a remote command via the rsh built-in client */
 int execute_rsh(char **args) {
-    if (args[1] == NULL || args[2] == NULL || args[3] == NULL) {
+    if (!args[1] || !args[2] || !args[3]) {
         write(1, "Usage: rsh <host> <port> <command>\n", 36);
         return 1;
     }
 
-    char *host = args[1];
-    int port = atoi(args[2]);
-
-    /* 🔥 build command string */
+    /* Build command string from remaining arguments */
     char command[1024] = "";
-    for (int i = 3; args[i] != NULL; i++) {
-        strcat(command, args[i]);
-        strcat(command, " ");
-    }
-
+    for (int i = 3; args[i]; i++) { strcat(command, args[i]); strcat(command, " "); }
     strcat(command, "\n");
 
-    /* 🔥 create socket */
+    /* Create and connect TCP socket to remote server */
     int sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0) {
-        perror("socket failed");
-        return 1;
-    }
-
     struct sockaddr_in server_addr;
+    memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(port);
-
-    if (inet_pton(AF_INET, host, &server_addr.sin_addr) <= 0) {
-        perror("Invalid address");
-        close(sock);
+    server_addr.sin_port = htons(atoi(args[2]));
+    if (inet_pton(AF_INET, args[1], &server_addr.sin_addr) <= 0 || connect(sock, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+        perror("RSH connection failed");
+        if (sock >= 0) close(sock);
         return 1;
     }
 
-    /* 🔥 connect */
-    if (connect(sock, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
-        perror("connect failed");
-        close(sock);
-        return 1;
-    }
-
+    /* Perform simple text-based authentication with the server */
     char buffer[1024];
-
-    /* ================= AUTH PHASE ================= */
-
-    // wait for AUTH prompt
     int n = recv(sock, buffer, sizeof(buffer) - 1, 0);
-    if (n <= 0) {
-        close(sock);
-        return 1;
-    }
-
-    buffer[n] = 0;
-
-    // send credentials
+    if (n <= 0) { close(sock); return 1; }
     char auth[128];
     snprintf(auth, sizeof(auth), "%s:%s\n", current_user, current_password);
     send(sock, auth, strlen(auth), 0);
-
-    // receive auth response
     n = recv(sock, buffer, sizeof(buffer) - 1, 0);
-    if (n <= 0) {
-        close(sock);
-        return 1;
-    }
-
-    buffer[n] = 0;
-
-    if (strstr(buffer, "AUTH FAILED")) {
+    if (n <= 0 || strstr(buffer, "AUTH FAILED")) {
         write(1, "Authentication failed\n", 22);
         close(sock);
         return 1;
     }
 
-    /* ================= COMMAND PHASE ================= */
-
-    // NOW send command (correct place)
+    /* Send command and print streaming response until END marker */
     send(sock, command, strlen(command), 0);
-
-    // read response
-    while (1) {
-        int bytes = recv(sock, buffer, sizeof(buffer) - 1, 0);
-        if (bytes <= 0) break;
-
-        buffer[bytes] = 0;
-
-        if (strstr(buffer, "__END__")) {
-            break;
-        }
-
-        write(STDOUT_FILENO, buffer, bytes);
+    while ((n = recv(sock, buffer, sizeof(buffer) - 1, 0)) > 0) {
+        buffer[n] = 0;
+        if (strstr(buffer, "__END__")) break;
+        write(STDOUT_FILENO, buffer, n);
     }
 
     close(sock);

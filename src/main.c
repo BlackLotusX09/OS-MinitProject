@@ -3,78 +3,54 @@
 #include <errno.h>
 #include <dispatch/dispatch.h>
 
+/* Absolute path of shell launch directory */
 char BASE_DIR[PATH_MAX];
+
+/* Counting semaphore to limit background jobs */
 dispatch_semaphore_t job_sem;
+
+/* Entry point for shell: handles server mode, init, and REPL loop */
 int main(int argc, char *argv[]) {
+    /* Check for server mode flag */
+    if (argc > 1 && strcmp(argv[1], "--server") == 0) return server();
 
-
-    // 🔥 SERVER MODE
-    if (argc > 1 && strcmp(argv[1], "--server") == 0) {
-        return server();
-    }
+    /* Initialize shell state and data */
     getcwd(BASE_DIR, sizeof(BASE_DIR));
-    // 🔥 NORMAL SHELL MODE
     setup_signals();
-
     load_users("data/users.txt");
     job_sem = dispatch_semaphore_create(MAX_BG_JOBS);
-    if (job_sem == NULL) {
-        perror("dispatch_semaphore_create");
-        exit(1);
-    }
 
-    if (!login()) {
-        exit(1);
-    }
+    if (!login()) exit(1);
 
     int status = 1;
-
     while (status) {
-
-        char prompt[64];
-        int len = snprintf(prompt, sizeof(prompt), "%s@oshell> ", current_user);
-        write(1, prompt, len);
-
+        /* Display prompt and read user input */
+        printf("%s@oshell> ", current_user);
+        fflush(stdout);
         char input[1024];
 
         if (fgets(input, sizeof(input), stdin) == NULL) {
-        // Check if the "error" was actually just a signal interruption
-        if (errno == EINTR) {
-            clearerr(stdin); // Reset the EOF/error tags for stdin[cite: 1]
-            continue;        // Jump back to the start of the while loop[cite: 1]
+            if (errno == EINTR) { clearerr(stdin); continue; }
+            printf("\n");
+            break;
         }
-        // If it wasn't EINTR, it's a real EOF (like Ctrl+D)[cite: 1]
-        write(1, "\n", 1);
-        break; 
-    }
 
         input[strcspn(input, "\n")] = 0;
-
         char original_input[1024];
         strcpy(original_input, input);
 
-        char *args[100];
-        char *command[10][50];
+        char *args[100], *command[10][50];
         int is_background = 0;
 
+        /* Parse and execute command */
         parse_input(input, args, &is_background);
         int n = split_pipe(args, command);
 
-        // 🔥 HISTORY LOGGING
-        if (args[0] != NULL && strcmp(args[0], "history") != 0) {
-            append_history(original_input);
-        }
+        if (args[0] && strcmp(args[0], "history") != 0) append_history(original_input);
 
-        if (n > 1) {
-            execute_pipe(command, n);
-        } else {
-            status = execute_command(args, is_background);
-        }
+        if (n > 1) execute_pipe(command, n);
+        else status = execute_command(args, is_background);
     }
 
-    // cleanup
-    // cleanup (dispatch semaphores are reference‑counted; releasing is optional on program exit)
-    // No explicit destroy needed for dispatch_semaphore_t
-
-
+    return 0;
 }

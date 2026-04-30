@@ -61,3 +61,7 @@ ls
 pwd
 exit
 exit
+exit
+git add .
+git commit -m "3rd draft"
+exit
