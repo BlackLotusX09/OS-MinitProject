@@ -118,3 +118,23 @@ sleep 60 &
 sleep 60 &
 sleep 60 &
 exit
+sleep 60 &
+sleep 60 &
+sleep 60 &
+sleep 60 &
+sleep 60 &
+sleep 60 &
+exit
+ls
+car README.md
+ls | grep ".c" | wc -l
+exit
+ls | grep ".c" | wc -l
+exit
+sleep 100
+exit
+sleep 100
+jobs
+exit
+exit
+rsh 127.0.0.1 9090 ls
